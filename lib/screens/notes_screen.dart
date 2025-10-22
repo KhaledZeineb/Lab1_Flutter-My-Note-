@@ -1,6 +1,11 @@
+// lib/screens/notes_screen.dart
 import 'package:flutter/material.dart';
-import '../components/note_item.dart';
-import '../components/note_input_dialog.dart';
+import 'package:provider/provider.dart';
+import '../models/note_model.dart';
+import '../services/note_service.dart';
+import '../widgets/note_item.dart';
+import '../widgets/add_note_modal.dart';
+import '../providers/auth_provider.dart';
 
 class NotesScreen extends StatefulWidget {
   @override
@@ -8,79 +13,75 @@ class NotesScreen extends StatefulWidget {
 }
 
 class _NotesScreenState extends State<NotesScreen> {
-  // Sample initial notes data
-  List<Map<String, dynamic>> notes = [
-    {
-      'id': '1',
-      'content': 'Learn Flutter',
-      'createdAt': DateTime.now().toIso8601String(),
-    },
-    {
-      'id': '2',
-      'content': 'Complete the tutorial',
-      'createdAt': DateTime.now().toIso8601String(),
-    },
-  ];
+  List<Note> notes = [];
+  bool isLoading = true;
+  final NoteService _noteService = NoteService();
 
-  // Controllers and state variables
-  TextEditingController noteController = TextEditingController();
-  Map<String, dynamic>? editingNote;
+  @override
+  void initState() {
+    super.initState();
+    _fetchNotes();
+  }
 
-  // Function to save a new or updated note
-  void saveNote() {
-    if (noteController.text.trim().isEmpty) return;
+  Future<void> _fetchNotes() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.user == null) return;
 
     setState(() {
-      if (editingNote != null) {
-        // Update existing note
-        for (int i = 0; i < notes.length; i++) {
-          if (notes[i]['id'] == editingNote!['id']) {
-            notes[i] = {
-              ...notes[i],
-              'content': noteController.text,
-              'updatedAt': DateTime.now().toIso8601String(),
-            };
-            break;
-          }
-        }
-        editingNote = null;
-      } else {
-        // Add new note
-        final newNote = {
-          'id': DateTime.now().millisecondsSinceEpoch.toString(),
-          'content': noteController.text,
-          'createdAt': DateTime.now().toIso8601String(),
-        };
-        notes.insert(0, newNote);
+      isLoading = true;
+    });
+
+    try {
+      // Pass the user ID when fetching notes
+      final fetchedNotes = await _noteService.getNotes(authProvider.user!.$id);
+      setState(() {
+        notes = fetchedNotes;
+        isLoading = false;
+      });
+    } catch (e) {
+      print('Failed to fetch notes: $e');
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _addNote(String text) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.user == null) return;
+
+    try {
+      // Pass the user ID when adding a note
+      final newNote = await _noteService.addNote(text, authProvider.user!.$id);
+      if (newNote != null) {
+        setState(() {
+          notes.insert(0, newNote);
+        });
+        Navigator.of(context).pop(); // Close the modal
       }
-    });
-
-    noteController.clear();
+    } catch (e) {
+      print('Failed to add note: $e');
+    }
   }
 
-  // Function to delete a note
-  void deleteNote(String id) {
-    setState(() {
-      notes.removeWhere((note) => note['id'] == id);
-    });
+  Future<void> _deleteNote(String noteId) async {
+    try {
+      final success = await _noteService.deleteNote(noteId);
+      if (success) {
+        setState(() {
+          notes.removeWhere((note) => note.id == noteId);
+        });
+      }
+    } catch (e) {
+      print('Failed to delete note: $e');
+    }
   }
 
-  // Function to open edit mode
-  void editNote(Map<String, dynamic> note) {
-    editingNote = note;
-    noteController.text = note['content'];
-    showNoteDialog();
-  }
-
-  // Show dialog for adding/editing notes
-  void showNoteDialog() {
-    showDialog(
+  void _showAddNoteModal() {
+    showModalBottomSheet(
       context: context,
-      builder: (context) => NoteInputDialog(
-        controller: noteController,
-        isEditing: editingNote != null,
-        onSave: saveNote,
-      ),
+      isScrollControlled: true,
+      builder: (context) => AddNoteModal(onAdd: _addNote),
     );
   }
 
@@ -111,11 +112,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   ),
                 ),
                 InkWell(
-                  onTap: () {
-                    editingNote = null;
-                    noteController.clear();
-                    showNoteDialog();
-                  },
+                  onTap: _showAddNoteModal,
                   child: Container(
                     width: 36,
                     height: 36,
@@ -141,37 +138,34 @@ class _NotesScreenState extends State<NotesScreen> {
 
           // Notes list or empty state
           Expanded(
-            child: notes.isNotEmpty
-                ? ListView.builder(
-                    padding: EdgeInsets.all(15),
-                    itemCount: notes.length,
-                    itemBuilder: (context, index) {
-                      return NoteItem(
-                        note: notes[index],
-                        onEdit: editNote,
-                        onDelete: deleteNote,
-                      );
-                    },
-                  )
-                : Center(
-                    child: Text(
-                      'No notes yet. Create one!',
-                      style: TextStyle(
-                        fontSize: 18,
-                        color: Color(0xFF7F8C8D),
+            child: isLoading
+                ? Center(child: CircularProgressIndicator())
+                : notes.isNotEmpty
+                    ? RefreshIndicator(
+                        onRefresh: _fetchNotes,
+                        child: ListView.builder(
+                          padding: EdgeInsets.all(15),
+                          itemCount: notes.length,
+                          itemBuilder: (context, index) {
+                            return NoteItem(
+                              note: notes[index],
+                              onDelete: () => _deleteNote(notes[index].id),
+                            );
+                          },
+                        ),
+                      )
+                    : Center(
+                        child: Text(
+                          'No notes yet. Create one!',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Color(0xFF7F8C8D),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
           ),
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    // Clean up the controller when the widget is disposed
-    noteController.dispose();
-    super.dispose();
   }
 }
