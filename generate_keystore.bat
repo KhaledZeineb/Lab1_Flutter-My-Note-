@@ -1,0 +1,2 @@
+@echo off
+keytool -genkey -v -keystore android/app/upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload -storepass notesapp2025 -keypass notesapp2025 -dname "CN=Notes App, OU=Development, O=Your Company, L=City, ST=State, C=US" -noprompt
